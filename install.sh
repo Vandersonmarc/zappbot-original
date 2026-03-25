@@ -1,163 +1,197 @@
 #!/bin/bash
 
-# --- SCRIPT DE CONFIGURAÇÃO E ATUALIZAÇÃO ---
+# ==========================================================================
+#  ZappBot Original - Instalador Profissional
+#  Baseado no projeto dinho17593/zappbot-painel
+# ==========================================================================
 
-TARGET_DIR="/var/www/bot-whatsapp"
+# Cores para o terminal
+RED=\'\\033[0;31m\'
+GREEN=\'\\033[0;32m\'
+YELLOW=\'\\033[1;33m\'
+BLUE=\'\\033[0;34m\'
+PURPLE=\'\\033[0;35m\'
+CYAN=\'\\033[0;36m\'
+NC=\'\\033[0m\'
 
-# Cores
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# Configurações do Projeto
+PROJECT_NAME="ZappBot Original"
+TARGET_DIR="/var/www/zappbot-original"
+REPO_URL="https://github.com/Vandersonmarc/zappbot-original.git"
+PM2_NAME="zappbot-original"
 
-echo -e "${GREEN}--- CONFIGURANDO SERVIDOR ---${NC}"
-
-# Garante que pacotes essenciais estejam instalados
-sudo apt-get update -qq
-sudo apt-get install -y nano curl -qq
-
-cd "$TARGET_DIR" || exit 1
-
-# ===================================================
-# 1. COLETA DE DADOS DO SERVIDOR
-# ===================================================
-echo -e "${BLUE}---------------------------------------------------${NC}"
-echo -e "${BLUE}           DADOS DO SERVIDOR E SSL               ${NC}"
-echo -e "${BLUE}---------------------------------------------------${NC}"
-
-read -p "1. Digite seu Domínio (ex: painel.site.com): " DOMAIN
-if [ -z "$DOMAIN" ]; then
-    echo -e "${RED}Erro: O domínio é um campo obrigatório!${NC}"
-    exit 1
-fi
-
-read -p "2. Digite seu E-mail (usado para o certificado SSL): " EMAIL_SSL
-
-# ===================================================
-# 2. CONFIGURAÇÃO DO ARQUIVO .ENV (LÓGICA MELHORADA)
-# ===================================================
-
-# Função para encapsular o processo de edição
-edit_env_file() {
+# Função para exibir o banner
+show_banner() {
+    clear
+    echo -e "${CYAN}============================================================${NC}"
+    echo -e "${CYAN}          🤖  $PROJECT_NAME - INSTALADOR OFICIAL  🤖          ${NC}"
+    echo -e "${CYAN}============================================================${NC}"
+    echo -e "${WHITE}  Instalador aprimorado para a versão original do ZappBot.  ${NC}"
+    echo -e "${CYAN}============================================================${NC}"
     echo ""
-    echo -e "${BLUE}O editor de texto NANO será aberto para você colar/editar o conteúdo.${NC}"
-    echo "1. Cole ou edite as variáveis de ambiente."
-    echo -e "2. Pressione ${YELLOW}CTRL+O${NC} e depois ${YELLOW}ENTER${NC} para SALVAR."
-    echo -e "3. Pressione ${YELLOW}CTRL+X${NC} para SAIR."
-    echo -e "${GREEN}Pressione ENTER para abrir o editor agora...${NC}"
-    read -r
-    
-    nano .env
-
-    # Validação para garantir que o arquivo não ficou vazio
-    if [ ! -s .env ]; then
-        echo -e "${RED}ERRO: O arquivo .env está vazio! A instalação não pode continuar.${NC}"
-        echo "Abortando..."
-        exit 1
-    fi
-    echo -e "${GREEN}Arquivo .env salvo com sucesso!${NC}"
 }
 
-# Verifica se o arquivo .env existe para decidir a ação
-if [ ! -f ".env" ]; then
-    # Se NÃO existe, a criação é OBRIGATÓRIA.
-    echo ""
-    echo -e "${YELLOW}--- ARQUIVO .ENV (PRIMEIRA INSTALAÇÃO) ---${NC}"
-    echo "Nenhum arquivo de configuração (.env) foi encontrado. É necessário criá-lo agora."
-    touch .env # Cria o arquivo para o nano não dar erro
-    edit_env_file
-else
-    # Se JÁ existe, o usuário pode escolher se quer editar.
-    echo ""
-    echo -e "${YELLOW}--- ARQUIVO .ENV ENCONTRADO ---${NC}"
-    read -p "Um arquivo .env já existe. Deseja editá-lo agora? (s/N): " EDIT_ENV
-    if [[ "${EDIT_ENV,,}" == "s" ]]; then
-        edit_env_file
-    else
-        echo "Ok, mantendo o arquivo .env existente."
-    fi
+# Função para exibir mensagens de status
+log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
+log_warn() { echo -e "${YELLOW}[AVISO]${NC} $1"; }
+log_error() { echo -e "${RED}[ERRO]${NC} $1"; exit 1; }
+
+# Verificar se o script está sendo executado como root
+if [ "$EUID" -ne 0 ]; then
+    log_error "Por favor, execute este script como root (sudo bash install.sh)."
 fi
 
-# ===================================================
-# 3. INSTALAÇÃO DE DEPENDÊNCIAS
-# ===================================================
-echo -e "${YELLOW}Instalando/Atualizando dependências do sistema...${NC}"
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt-get update -qq
-sudo apt-get install -y nodejs nginx build-essential git python3 ffmpeg certbot python3-certbot-nginx -qq
+# 1. Preparação do Sistema
+show_banner
+log_info "Preparando o sistema e instalando dependências básicas..."
+apt-get update -qq
+apt-get install -y curl git wget unzip build-essential python3 ffmpeg whiptail -qq > /dev/null 2>&1
+log_success "Dependências básicas instaladas."
 
-# ===================================================
-# 4. INSTALAÇÃO DO NODE.JS
-# ===================================================
-echo -e "${YELLOW}Instalando/Atualizando módulos do Node.js...${NC}"
-rm -rf node_modules package-lock.json
-npm install --silent
+# 2. Menu de Opções (Whiptail)
+OPTION=$(whiptail --title "$PROJECT_NAME" --menu "Escolha uma opção:" 15 60 4 \
+"1" "Instalação Completa (Nova)" \
+"2" "Atualizar Projeto (Manter Dados)" \
+"3" "Configurar SSL/Nginx" \
+"4" "Sair" 3>&1 1>&2 2>&3)
 
-# ===================================================
-# 5. ESTRUTURA E PERMISSÕES
-# ===================================================
-echo -e "${YELLOW}Verificando estrutura de arquivos e permissões...${NC}"
-mkdir -p uploads sessions auth_sessions
-for db in users.json bots.json groups.json settings.json; do
-    if [ ! -f "$db" ]; then echo "{}" > "$db"; fi
-done
-chmod -R 777 uploads sessions auth_sessions *.json
-if [ -f "app.js" ]; then mv app.js server.js; fi
+case $OPTION in
+    1) log_info "Iniciando Instalação Completa..." ;;
+    2) log_info "Iniciando Atualização..." ;;
+    3) log_info "Iniciando Configuração de SSL/Nginx..." ;;
+    *) exit 0 ;;
+esac
 
-# ===================================================
-# 6. INICIALIZAÇÃO (PM2)
-# ===================================================
-echo -e "${YELLOW}Reiniciando a aplicação com PM2...${NC}"
-npm install pm2 -g --silent
-pm2 start server.js --name "painel" --update-env || pm2 restart painel
-pm2 save
-pm2 startup
-
-# ===================================================
-# 7. NGINX E SSL (CONDICIONAL)
-# ===================================================
-read -p "Deseja configurar/reconfigurar o Nginx e o certificado SSL para o domínio ${DOMAIN}? (s/N): " CONFIGURE_SSL
-
-if [[ "${CONFIGURE_SSL,,}" == "s" ]]; then
-    echo -e "${YELLOW}Configurando Proxy Reverso com Nginx...${NC}"
-    NGINX_CONF="/etc/nginx/sites-available/bot-whatsapp"
-
-    cat > $NGINX_CONF <<EOF
-server {
-    server_name ${DOMAIN};
-    root ${TARGET_DIR};
+# 3. Lógica de Instalação/Atualização
+if [ "$OPTION" == "1" ] || [ "$OPTION" == "2" ]; then
     
-    location ~ /.well-known/acme-challenge { allow all; }
+    # Backup se for atualização
+    if [ "$OPTION" == "2" ] && [ -d "$TARGET_DIR" ]; then
+        BKP_DIR="/root/zappbot_original_backup_$(date +%Y%m%d_%H%M%S)"
+        log_info "Criando backup em $BKP_DIR..."
+        mkdir -p "$BKP_DIR"
+        cp "$TARGET_DIR/.env" "$BKP_DIR/" 2>/dev/null
+        cp "$TARGET_DIR"/*.json "$BKP_DIR/" 2>/dev/null
+        cp -r "$TARGET_DIR/sessions" "$BKP_DIR/" 2>/dev/null
+        cp -r "$TARGET_DIR/auth_sessions" "$BKP_DIR/" 2>/dev/null
+        log_success "Backup concluído."
+    fi
+
+    # Download do Código
+    log_info "Baixando a versão mais recente do GitHub..."
+    if [ -d "$TARGET_DIR" ]; then
+        cd "$TARGET_DIR"
+        git fetch --all
+        git reset --hard origin/main
+    else
+        mkdir -p "/var/www"
+        git clone "$REPO_URL" "$TARGET_DIR"
+        cd "$TARGET_DIR"
+    fi
+    log_success "Código fonte atualizado."
+
+    # Restauração do Backup
+    if [ -d "$BKP_DIR" ]; then
+        log_info "Restaurando dados do backup..."
+        cp "$BKP_DIR/.env" "$TARGET_DIR/" 2>/dev/null
+        cp "$BKP_DIR"/*.json "$TARGET_DIR/" 2>/dev/null
+        cp -r "$BKP_DIR/sessions" "$TARGET_DIR/" 2>/dev/null
+        cp -r "$BKP_DIR/auth_sessions" "$TARGET_DIR/" 2>/dev/null
+        log_success "Dados restaurados."
+    fi
+
+    # Instalação do Node.js (se necessário)
+    if ! command -v node &> /dev/null; then
+        log_info "Instalando Node.js 18 (compatível com o projeto original)..."
+        curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+        apt-get install -y nodejs -qq > /dev/null 2>&1
+    fi
+
+    # Instalação de Dependências do Projeto
+    log_info "Instalando módulos do Node.js (isso pode demorar)..."
+    npm install --silent
+    log_success "Módulos instalados."
+
+    # Configuração do .env (Interativo)
+    if [ ! -f ".env" ]; then
+        log_info "Configurando variáveis de ambiente (.env)..."
+        
+        PORT=$(whiptail --title "Configuração de Porta" --inputbox "Digite a porta para o servidor (padrão: 3000):" 10 60 "3000" 3>&1 1>&2 2>&3)
+        SECRET=$(openssl rand -hex 16)
+        
+        cat > .env <<EOF
+PORT=$PORT
+SESSION_SECRET=$SECRET
+# Para configurar Google OAuth, Mercado Pago ou Gemini, edite o .env manualmente após a instalação.
+# Consulte o README.md para mais detalhes.
+EOF
+        log_success "Arquivo .env criado."
+    else
+        if whiptail --title "Arquivo .env existente" --yesno "Um arquivo .env já existe. Deseja editá-lo agora?" 10 60; then
+            nano .env
+        fi
+    fi
+
+    # Permissões
+    log_info "Ajustando permissões..."
+    mkdir -p uploads sessions auth_sessions
+    chmod -R 777 uploads sessions auth_sessions *.json 2>/dev/null
+    log_success "Permissões ajustadas."
+
+    # Inicialização com PM2
+    log_info "Iniciando aplicação com PM2..."
+    npm install pm2 -g --silent
+    pm2 delete "$PM2_NAME" 2>/dev/null
+    pm2 start server.js --name "$PM2_NAME"
+    pm2 save
+    pm2 startup
+    log_success "Aplicação rodando no PM2."
+fi
+
+# 4. Configuração de Nginx e SSL
+if [ "$OPTION" == "1" ] || [ "$OPTION" == "3" ]; then
+    if whiptail --title "Configuração de Domínio" --yesno "Deseja configurar o Nginx e SSL (HTTPS) agora?" 10 60; then
+        DOMAIN=$(whiptail --title "Domínio" --inputbox "Digite seu domínio (ex: painel.seusite.com):" 10 60 3>&1 1>&2 2>&3)
+        EMAIL=$(whiptail --title "E-mail" --inputbox "Digite seu e-mail para o certificado SSL:" 10 60 3>&1 1>&2 2>&3)
+
+        if [ ! -z "$DOMAIN" ]; then
+            log_info "Configurando Nginx para $DOMAIN..."
+            apt-get install -y nginx certbot python3-certbot-nginx -qq > /dev/null 2>&1
+            
+            NGINX_CONF="/etc/nginx/sites-available/zappbot-original"
+            cat > $NGINX_CONF <<EOF
+server {
+    listen 80;
+    server_name $DOMAIN;
+
     location / {
-        proxy_pass http://localhost:3000;
+        proxy_pass http://localhost:$PORT;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
+        proxy_set_header Connection \'upgrade\';
         proxy_set_header Host \$host;
         proxy_cache_bypass \$http_upgrade;
     }
 }
 EOF
-
-    ln -s -f $NGINX_CONF /etc/nginx/sites-enabled/
-    rm -f /etc/nginx/sites-enabled/default
-    sudo nginx -t && sudo systemctl restart nginx
-
-    if [ ! -z "$EMAIL_SSL" ]; then
-        echo -e "${YELLOW}Gerando certificado SSL com Certbot...${NC}"
-        sudo ufw allow 'Nginx Full'
-        sudo certbot --nginx -d $DOMAIN --non-interactive --agree-tos -m $EMAIL_SSL --redirect
-    else
-        echo -e "${RED}E-mail não informado. Geração de SSL ignorada.${NC}"
+            ln -s -f $NGINX_CONF /etc/nginx/sites-enabled/
+            rm -f /etc/nginx/sites-enabled/default
+            nginx -t && systemctl restart nginx
+            
+            log_info "Gerando certificado SSL gratuito (Let\'s Encrypt)..."
+            certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL" --redirect
+            log_success "Nginx e SSL configurados com sucesso!"
+        fi
     fi
-else
-    echo -e "${YELLOW}Configuração de Nginx e SSL ignorada, conforme solicitado.${NC}"
 fi
 
-echo "---------------------------------------------------"
-echo -e "${GREEN}✅ PROCESSO CONCLUÍDO!${NC}"
-echo "---------------------------------------------------"
-echo "Seu painel deve estar acessível em: https://$DOMAIN"
-echo "(Verifique se o DNS do seu domínio está apontando corretamente para o IP deste servidor)."
-echo "---------------------------------------------------"
+# Finalização
+show_banner
+echo -e "${GREEN}✅ INSTALAÇÃO CONCLUÍDA COM SUCESSO!${NC}"
+echo ""
+echo -e "${WHITE}Acesse seu painel em:${NC} ${CYAN}https://$DOMAIN${NC}"
+echo -e "${WHITE}Gerenciar processo:${NC} ${YELLOW}pm2 logs $PM2_NAME${NC}"
+echo ""
+echo -e "${PURPLE}Obrigado por usar o ZappBot Original!${NC}"
+echo "============================================================"
